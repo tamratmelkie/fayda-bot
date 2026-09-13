@@ -42,7 +42,6 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("🔄 OTP እየተረጋገጠ ነው... የፋይዳ PDF በመዘጋጀት ላይ ነው...")
 
-    # PDF መፍጠሪያ እና መላኪያ ክፍል
     pdf_path = f"{fin}_fayda.pdf"
     with open(pdf_path, "wb") as f:
         f.write(b"%PDF-1.4 ... Fayda ID Document Content ...")
@@ -64,97 +63,16 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
+    if not TELEGRAM_BOT_TOKEN:
+        print("Error: TELEGRAM_BOT_TOKEN environment variable is missing!")
+        return
+
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
             ENTER_FIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fin)],
-            ENTER_OTP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    app.add_handler(conv_handler)
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()    except Exception as e:
-        await query.message.reply_text("❌ ክፍያውን ማረጋገጥ አልተቻለም።")
-        return CONFIRM_PAYMENT
-
-async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    otp_code = update.message.text.strip()
-    fin = context.user_data.get('fin')
-
-    await update.message.reply_text("🔄 OTP እየተረጋገጠ ነው... እባክዎን ትንሽ ይጠብቁ።")
-
-    pdf_path = f"{fin}_fayda.pdf"
-    with open(pdf_path, "wb") as f:
-        f.write(b"%PDF-1.4 ... Fayda ID Document Content ...")
-
-    with open(pdf_path, "rb") as pdf_file:
-        await update.message.reply_document(
-            document=pdf_file,
-            filename=f"Fayda_ID_{fin}.pdf",
-            caption="✅ የፋይዳ PDF መታወቂያዎ በተሳካ ሁኔታ ተወርዷል!"
-        )
-
-    if os.path.exists(pdf_path):
-        os.remove(pdf_path)
-
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ ተግባሩ ተሰርዟል። እንደገና ለመጀመር /start ይበሉ።")
-    return ConversationHandler.END
-
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            ENTER_FIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fin)],
-            CONFIRM_PAYMENT: [CallbackQueryHandler(verify_payment, pattern="^verify_pay$")],
-            ENTER_OTP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    app.add_handler(conv_handler)
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-    pdf_path = f"{fin}_fayda.pdf"
-    with open(pdf_path, "wb") as f:
-        f.write(b"%PDF-1.4 ... Fayda ID Document Content ...")
-
-    with open(pdf_path, "rb") as pdf_file:
-        await update.message.reply_document(
-            document=pdf_file,
-            filename=f"Fayda_ID_{fin}.pdf",
-            caption="✅ የፋይዳ PDF መታወቂያዎ በተሳካ ሁኔታ ተወርዷል!"
-        )
-
-    if os.path.exists(pdf_path):
-        os.remove(pdf_path)
-
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ ተግባሩ ተሰርዟል። እንደገና ለመጀመር /start ይበሉ።")
-    return ConversationHandler.END
-
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            ENTER_FIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fin)],
-            CONFIRM_PAYMENT: [CallbackQueryHandler(verify_payment, pattern="^verify_pay$")],
             ENTER_OTP: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp)],
         },
         fallbacks=[CommandHandler('cancel', cancel)]
