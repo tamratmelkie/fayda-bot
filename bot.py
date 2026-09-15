@@ -27,29 +27,41 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ENTER_FIN
 
     context.user_data['fin'] = fin_number
-    await update.message.reply_text("🔄 ከፋይዳ auth ፖርታል ጋር በመገናኘት ላይ...")
+    await update.message.reply_text("🔄 ከፋይዳ auth ፖርታል ጋር በመገናኘት ላይ... ቁልፎች በመሰብሰብ ላይ...")
 
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
         "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.5",
         "Origin": FAYDA_AUTH_URL,
-        "Referer": f"{FAYDA_AUTH_URL}/"
+        "Connection": "keep-alive"
     })
     
     try:
-        # 1. የመጀመሪያውን የ Session Cookie እና CSRF Token መቀበል
-        init_res = session.get(FAYDA_AUTH_URL, timeout=15)
+        # 1. የ OAuth login ገፅን በመክፈት Session እና Cookies መያዝ
+        login_init_url = f"{FAYDA_AUTH_URL}/login"
+        init_res = session.get(login_init_url, timeout=15)
         
         xsrf_token = session.cookies.get("XSRF-TOKEN", "")
         
-        # 2. የ OTP መላኪያ Header ማዘጋጀት
+        # 2. ከ HTML ገፅ ውስጥ oauth-details-key መኖሩን መፈለግ
         headers = {
             "Content-Type": "application/json",
             "X-XSRF-TOKEN": xsrf_token,
+            "Referer": init_res.url if init_res.url else login_init_url
         }
 
-        # 3. OTP ጥያቄ ወደ auth.fayda.et መላክ
+        # የ oauth key ካለ በ Regex ፈልጎ መያዝ
+        key_match = re.search(r'oauth-details-key["\']?\s*[:=]\s*["\']?([^"\'&\s]+)', init_res.text)
+        hash_match = re.search(r'oauth-details-hash["\']?\s*[:=]\s*["\']?([^"\'&\s]+)', init_res.text)
+
+        if key_match:
+            headers["oauth-details-key"] = key_match.group(1)
+        if hash_match:
+            headers["oauth-details-hash"] = hash_match.group(1)
+
+        # 3. OTP ጥያቄ መላክ
         otp_url = f"{FAYDA_AUTH_URL}/v1/esignet/authorization/send-otp"
         payload = {
             "individualId": fin_number,
@@ -70,7 +82,7 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(
                 f"❌ ከፋይዳ ፖርታል የመጣ ምላሽ (Status {response.status_code})፦\n"
-                f"{response.text[:200]}"
+                f"{response.text[:250]}"
             )
             return ENTER_FIN
 
