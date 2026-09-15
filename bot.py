@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from telegram import Update
 from telegram.ext import (
@@ -7,7 +8,7 @@ from telegram.ext import (
 )
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-FAYDA_BASE_URL = "https://resident.fayda.et"
+FAYDA_AUTH_URL = "https://auth.fayda.et"
 
 ENTER_FIN, ENTER_OTP = range(2)
 
@@ -26,24 +27,37 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ENTER_FIN
 
     context.user_data['fin'] = fin_number
-    await update.message.reply_text("🔄 ከፋይዳ ፖርታል ጋር በመገናኘት ላይ... እባክዎን ትንሽ ይጠብቁ...")
+    await update.message.reply_text("🔄 ከፋይዳ auth ፖርታል ጋር በመገናኘት ላይ...")
 
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": FAYDA_AUTH_URL,
+        "Referer": f"{FAYDA_AUTH_URL}/"
     })
     
     try:
-        otp_url = f"{FAYDA_BASE_URL}/api/v1/identity/otp/generate"
+        # 1. የመጀመሪያውን የ Session Cookie እና CSRF Token መቀበል
+        init_res = session.get(FAYDA_AUTH_URL, timeout=15)
+        
+        xsrf_token = session.cookies.get("XSRF-TOKEN", "")
+        
+        # 2. የ OTP መላኪያ Header ማዘጋጀት
+        headers = {
+            "Content-Type": "application/json",
+            "X-XSRF-TOKEN": xsrf_token,
+        }
+
+        # 3. OTP ጥያቄ ወደ auth.fayda.et መላክ
+        otp_url = f"{FAYDA_AUTH_URL}/v1/esignet/authorization/send-otp"
         payload = {
             "individualId": fin_number,
             "individualIdType": "FIN",
             "otpChannel": ["SMS"]
         }
         
-        response = session.post(otp_url, json=payload, timeout=15)
+        response = session.post(otp_url, json=payload, headers=headers, timeout=15)
         
         if response.status_code == 200:
             context.user_data['session'] = session
@@ -55,8 +69,8 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ENTER_OTP
         else:
             await update.message.reply_text(
-                f"❌ ከፋይዳ ፖርታል የመጣ ኤረር፦ Status Code {response.status_code}\n"
-                f"ምላሽ፦ {response.text[:200]}"
+                f"❌ ከፋይዳ ፖርታል የመጣ ምላሽ (Status {response.status_code})፦\n"
+                f"{response.text[:200]}"
             )
             return ENTER_FIN
 
@@ -72,13 +86,12 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ እባክዎን ትክክለኛ የ 6 ዲጂት OTP ኮድ ያስገቡ፦")
         return ENTER_OTP
 
-    await update.message.reply_text("🔄 OTP እየተረጋገጠ ነው... የፋይዳ PDF በፖርታሉ በመዘጋጀት ላይ ነው...")
+    await update.message.reply_text("🔄 OTP እየተረጋገጠ ነው... PDF በመዘጋጀት ላይ ነው...")
 
     pdf_path = f"{fin}_fayda.pdf"
-    
     try:
         with open(pdf_path, "wb") as f:
-            f.write(b"%PDF-1.4 ... Fayda Official ID Document Content ...")
+            f.write(b"%PDF-1.4 ... Fayda Document Content ...")
 
         with open(pdf_path, "rb") as pdf_file:
             await update.message.reply_document(
@@ -87,7 +100,7 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption="✅ የፋይዳ PDF መታወቂያዎ በተሳካ ሁኔታ ተወርዷል!"
             )
     except Exception as e:
-        await update.message.reply_text(f"❌ PDF ፋይሉን ማውረድ አልተቻለም፦ {str(e)}")
+        await update.message.reply_text(f"❌ PDF ማውረድ አልተቻለም፦ {str(e)}")
     finally:
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
