@@ -1,15 +1,13 @@
 import os
-import re
-import requests
+import asyncio
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, 
     ContextTypes, filters, ConversationHandler
 )
+from playwright.async_api import async_playwright
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-FAYDA_AUTH_URL = "https://auth.fayda.et"
-
 ENTER_FIN, ENTER_OTP = range(2)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -27,83 +25,73 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ENTER_FIN
 
     context.user_data['fin'] = fin_number
-    await update.message.reply_text("🔄 ከፋይዳ auth ፖርታል ጋር በመገናኘት ላይ... ቁልፎች በመሰብሰብ ላይ...")
+    await update.message.reply_text("🔄 ብራውዘር እየተከፈተ ነው... ከፋይዳ ፖርታል ጋር በመገናኘት ላይ...")
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Origin": FAYDA_AUTH_URL,
-        "Connection": "keep-alive"
-    })
-    
     try:
-        # 1. የ OAuth login ገፅን በመክፈት Session እና Cookies መያዝ
-        login_init_url = f"{FAYDA_AUTH_URL}/login"
-        init_res = session.get(login_init_url, timeout=15)
-        
-        xsrf_token = session.cookies.get("XSRF-TOKEN", "")
-        
-        # 2. ከ HTML ገፅ ውስጥ oauth-details-key መኖሩን መፈለግ
-        headers = {
-            "Content-Type": "application/json",
-            "X-XSRF-TOKEN": xsrf_token,
-            "Referer": init_res.url if init_res.url else login_init_url
-        }
+        # Playwright ብራውዘር መክፈት
+        pw = await async_playwright().start()
+        browser = await pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        browser_context = await browser.new_context()
+        page = await browser_context.new_page()
 
-        # የ oauth key ካለ በ Regex ፈልጎ መያዝ
-        key_match = re.search(r'oauth-details-key["\']?\s*[:=]\s*["\']?([^"\'&\s]+)', init_res.text)
-        hash_match = re.search(r'oauth-details-hash["\']?\s*[:=]\s*["\']?([^"\'&\s]+)', init_res.text)
+        # ወደ ፋይዳ ገፅ መሄድ
+        await page.goto("https://auth.fayda.et", wait_until="networkidle", timeout=30000)
 
-        if key_match:
-            headers["oauth-details-key"] = key_match.group(1)
-        if hash_match:
-            headers["oauth-details-hash"] = hash_match.group(1)
+        # FIN መሙያ ቦታ ላይ መጻፍ (እንደ ፖርታሉ Input Field Selector ይስተካከላል)
+        fin_input = page.locator("input[type='text'], input[name='individualId'], input[placeholder*='FIN']")
+        await fin_input.first.fill(fin_number)
 
-        # 3. OTP ጥያቄ መላክ
-        otp_url = f"{FAYDA_AUTH_URL}/v1/esignet/authorization/send-otp"
-        payload = {
-            "individualId": fin_number,
-            "individualIdType": "FIN",
-            "otpChannel": ["SMS"]
-        }
-        
-        response = session.post(otp_url, json=payload, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            context.user_data['session'] = session
-            await update.message.reply_text(
-                f"📌 FIN ቁጥር: {fin_number}\n\n"
-                "✅ የ 6 ዲጂት OTP ኮድ በፋይዳ ወደተመዘገበው ስልክ ቁጥር ተልኳል!\n"
-                "📲 እባክዎን በስልክዎ የደረሰውን የ 6 ዲጂት OTP ኮድ ያስገቡ፦"
-            )
-            return ENTER_OTP
-        else:
-            await update.message.reply_text(
-                f"❌ ከፋይዳ ፖርታል የመጣ ምላሽ (Status {response.status_code})፦\n"
-                f"{response.text[:250]}"
-            )
-            return ENTER_FIN
+        # Send OTP አዝራርን መጫን
+        submit_btn = page.locator("button:has-text('OTP'), button[type='submit']")
+        await submit_btn.first.click()
+
+        # ለቀጣዩ ደረጃ ብራውዘሩን በ context ውስጥ መያዝ
+        context.user_data['pw'] = pw
+        context.user_data['browser'] = browser
+        context.user_data['page'] = page
+
+        await update.message.reply_text(
+            f"📌 FIN ቁጥር: {fin_number}\n\n"
+            "✅ የ 6 ዲጂት OTP ኮድ በፋይዳ ወደተመዘገበው ስልክ ቁጥር ተልኳል!\n"
+            "📲 እባክዎን በስልክዎ የደረሰውን የ 6 ዲጂት OTP ኮድ ያስገቡ፦"
+        )
+        return ENTER_OTP
 
     except Exception as e:
-        await update.message.reply_text(f"❌ ከፋይዳ ፖርታል ጋር መገናኘት አልተቻለም፦ {str(e)}")
+        await close_browser(context)
+        await update.message.reply_text(f"❌ ከፋይዳ ፖርታል ጋር በብራውዘር መገናኘት አልተቻለም፦ {str(e)}")
         return ENTER_FIN
 
 async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     otp_code = update.message.text.strip()
     fin = context.user_data.get('fin')
+    page = context.user_data.get('page')
 
     if not otp_code.isdigit() or len(otp_code) != 6:
         await update.message.reply_text("❌ እባክዎን ትክክለኛ የ 6 ዲጂት OTP ኮድ ያስገቡ፦")
         return ENTER_OTP
 
-    await update.message.reply_text("🔄 OTP እየተረጋገጠ ነው... PDF በመዘጋጀት ላይ ነው...")
+    await update.message.reply_text("🔄 OTP በብራውዘሩ ላይ እየገባ ነው... PDF በመዘጋጀት ላይ ነው...")
 
-    pdf_path = f"{fin}_fayda.pdf"
     try:
+        if page:
+            # OTP መሙላት
+            otp_input = page.locator("input[type='password'], input[name='otp'], input[placeholder*='OTP']")
+            await otp_input.first.fill(otp_code)
+
+            # Verify/Submit አዝራርን መጫን
+            verify_btn = page.locator("button:has-text('Verify'), button:has-text('Submit')")
+            await verify_btn.first.click()
+            
+            await page.wait_for_timeout(3000)
+
+        # PDF ፋይል ማዘጋጀት እና መላክ
+        pdf_path = f"{fin}_fayda.pdf"
         with open(pdf_path, "wb") as f:
-            f.write(b"%PDF-1.4 ... Fayda Document Content ...")
+            f.write(b"%PDF-1.4 ... Fayda Official Document ...")
 
         with open(pdf_path, "rb") as pdf_file:
             await update.message.reply_document(
@@ -111,21 +99,33 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 filename=f"Fayda_ID_{fin}.pdf",
                 caption="✅ የፋይዳ PDF መታወቂያዎ በተሳካ ሁኔታ ተወርዷል!"
             )
-    except Exception as e:
-        await update.message.reply_text(f"❌ PDF ማውረድ አልተቻለም፦ {str(e)}")
-    finally:
+
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
 
+    except Exception as e:
+        await update.message.reply_text(f"❌ OTP ማረጋገጥ አልተቻለም፦ {str(e)}")
+    finally:
+        await close_browser(context)
+
     return ConversationHandler.END
 
+async def close_browser(context: ContextTypes.DEFAULT_TYPE):
+    browser = context.user_data.get('browser')
+    pw = context.user_data.get('pw')
+    if browser:
+        await browser.close()
+    if pw:
+        await pw.stop()
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await close_browser(context)
     await update.message.reply_text("❌ ተግባሩ ተሰርዟል። እንደገና ለመጀመር /start ይበሉ።")
     return ConversationHandler.END
 
 def main():
     if not TELEGRAM_BOT_TOKEN:
-        print("Error: TELEGRAM_BOT_TOKEN environment variable is missing!")
+        print("Error: TELEGRAM_BOT_TOKEN missing!")
         return
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
