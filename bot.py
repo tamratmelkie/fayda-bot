@@ -33,29 +33,32 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             browser = await pw.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
+                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
             )
         except Exception:
             subprocess.run(["python", "-m", "playwright", "install", "chromium"])
             browser = await pw.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
+                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
             )
 
-        browser_context = await browser.new_context()
+        browser_context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         page = await browser_context.new_page()
 
-        # ገጹን መክፈት
-        await page.goto("https://auth.fayda.et", wait_until="domcontentloaded", timeout=60000)
+        # ገጹን የመክፈት ሙከራ
+        await page.goto("https://auth.fayda.et", wait_until="commit", timeout=60000)
+        await page.wait_for_timeout(4000)
 
-        # FIN መፃፊያ ቦታ ላይ መሙላት
-        fin_input = page.locator("input[type='text'], input[name='individualId'], input[placeholder*='FIN']")
-        await fin_input.first.wait_for(state="visible", timeout=30000)
-        await fin_input.first.fill(fin_number)
+        # የ FIN መፃፊያ ቦታን ፈልጎ መሙላት
+        fin_input = page.locator("input").first
+        await fin_input.wait_for(state="attached", timeout=30000)
+        await fin_input.fill(fin_number)
 
-        # Submit አዝራርን መጫን
-        submit_btn = page.locator("button:has-text('OTP'), button[type='submit']")
-        await submit_btn.first.click()
+        # Submit አዝራር መጫን
+        submit_btn = page.locator("button").first
+        await submit_btn.click()
 
         context.user_data['pw'] = pw
         context.user_data['browser'] = browser
@@ -86,11 +89,11 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if page:
-            otp_input = page.locator("input[type='password'], input[name='otp'], input[placeholder*='OTP']")
-            await otp_input.first.fill(otp_code)
+            otp_input = page.locator("input").first
+            await otp_input.fill(otp_code)
 
-            verify_btn = page.locator("button:has-text('Verify'), button:has-text('Submit')")
-            await verify_btn.first.click()
+            verify_btn = page.locator("button").first
+            await verify_btn.click()
             
             await page.wait_for_timeout(3000)
 
