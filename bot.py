@@ -33,7 +33,13 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             browser = await pw.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--single-process"
+                ]
             )
         except Exception:
             subprocess.run(["python", "-m", "playwright", "install", "chromium"])
@@ -47,17 +53,20 @@ async def handle_fin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         page = await browser_context.new_page()
 
-        # ገጹን የመክፈት ሙከራ
-        await page.goto("https://auth.fayda.et", wait_until="commit", timeout=60000)
-        await page.wait_for_timeout(4000)
+        # ገጹ በፍጥነት እንዲከፈት ምስሎችን እና ከባድ ፋይሎችን ብሎክ ማድረግ
+        await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font"] else route.continue_())
+
+        # ገጹን የመክፈት ሙከራ (Timeout ወደ 90 ሰከንድ ተሳድጓል)
+        await page.goto("https://auth.fayda.et", wait_until="domcontentloaded", timeout=90000)
+        await page.wait_for_timeout(3000)
 
         # የ FIN መፃፊያ ቦታን ፈልጎ መሙላት
-        fin_input = page.locator("input").first
-        await fin_input.wait_for(state="attached", timeout=30000)
+        fin_input = page.locator("input[type='text'], input[name='individualId'], input[placeholder*='FIN'], input").first
+        await fin_input.wait_for(state="attached", timeout=45000)
         await fin_input.fill(fin_number)
 
         # Submit አዝራር መጫን
-        submit_btn = page.locator("button").first
+        submit_btn = page.locator("button:has-text('OTP'), button[type='submit'], button").first
         await submit_btn.click()
 
         context.user_data['pw'] = pw
@@ -89,10 +98,10 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         if page:
-            otp_input = page.locator("input").first
+            otp_input = page.locator("input[type='password'], input[name='otp'], input[placeholder*='OTP'], input").first
             await otp_input.fill(otp_code)
 
-            verify_btn = page.locator("button").first
+            verify_btn = page.locator("button:has-text('Verify'), button:has-text('Submit'), button").first
             await verify_btn.click()
             
             await page.wait_for_timeout(3000)
